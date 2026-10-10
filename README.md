@@ -44,7 +44,9 @@ Kết quả tải về ở tab ④: `ket-qua.zip` (gồm `video.mp4`, `voice.mp3
 | `color_palette` | Bảng màu |
 | `negative_prompt` | Những thứ cần tránh |
 
-Cột **Ảnh nền** của từng cảnh chỉ cần mô tả **chủ thể** (ví dụ `a robot hand holding a glowing smartphone`); phong cách lấy từ JSON. Đổi JSON thì ảnh được tạo mới, còn đổi chủ đề giao diện thì ảnh giữ nguyên. Đạo diễn AI cũng đọc JSON này để viết mô tả chủ thể cho hợp phong cách.
+**Có JSON là tự tạo ảnh cho mọi cảnh** (trừ cảnh kết): tool tự viết mô tả chủ thể từ lời đọc (Claude nếu bạn nhập API key, nếu không thì dịch tự động), rồi tạo ảnh theo JSON. Bấm “Điền mô tả ảnh vào bảng” để xem/sửa mô tả trước khi tạo ảnh; ô nào bạn tự điền thì được giữ nguyên.
+
+Cột **Ảnh nền** của từng cảnh có thể ghi **chủ thể** thủ công (ví dụ `a robot hand holding a glowing smartphone`); phong cách lấy từ JSON. Đổi JSON thì ảnh được tạo mới, còn đổi chủ đề giao diện thì ảnh giữ nguyên. Đạo diễn AI cũng đọc JSON này để viết mô tả chủ thể cho hợp phong cách.
 
 ## Lưu trữ
 
@@ -78,6 +80,9 @@ app/
   media.py       ảnh nền: tải lên, link, ảnh AI
   aiimage.py     tạo ảnh nền bằng AI
   director.py    đạo diễn AI (Claude)
+  subjects.py    tự viết mô tả chủ thể ảnh từ lời đọc
+  autobg.py      tự điền mô tả ảnh cho các cảnh trống
+  voices.py      thư viện giọng đọc (Google Drive)
   render.py      dựng hình bằng Chromium + FFmpeg
   assemble.py    ghép video, trộn âm thanh, xuất phụ đề
   jobs.py        chạy nền, phát nhật ký trực tiếp

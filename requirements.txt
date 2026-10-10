@@ -5,3 +5,4 @@ numpy
 pillow
 requests
 anthropic
+deep-translator
