@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import re
 import subprocess
+import zipfile
 from pathlib import Path
 
 import numpy as np
@@ -114,8 +115,12 @@ def assemble(pdir: Path, scenes: list[dict], st: dict, log=print) -> dict[str, P
     (pdir / "captions.srt").write_text(
         make_srt(scenes, starts, [max(d - gap, 0.1) for d in durs]), encoding="utf-8"
     )
-    log(f"✅ Hoàn tất: {total:.1f}s · {video.stat().st_size / 1e6:.1f} MB")
-    return {"video": video, "voice": mp3, "script": pdir / "script.txt", "srt": pdir / "captions.srt"}
+    bundle = pdir / "ket-qua.zip"
+    with zipfile.ZipFile(bundle, "w", zipfile.ZIP_STORED) as z:
+        for f in (video, mp3, pdir / "script.txt", pdir / "captions.srt"):
+            z.write(f, f.name)
+    log(f"✅ Hoàn tất: {total:.1f}s · {video.stat().st_size / 1e6:.1f} MB — hãy tải về ngay (dự án không được lưu lại).")
+    return {"video": video, "zip": bundle, "voice": mp3, "script": pdir / "script.txt", "srt": pdir / "captions.srt"}
 
 
 def preview_scene(pdir: Path, i: int, scenes: list[dict], st: dict, log=print) -> Path:

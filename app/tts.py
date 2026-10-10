@@ -1,6 +1,7 @@
 """Tạo giọng đọc từng cảnh bằng OmniVoice (có cache theo nội dung)."""
 from __future__ import annotations
 
+import shutil
 import subprocess
 import wave
 from pathlib import Path
@@ -43,21 +44,18 @@ def ref_path(pdir: Path) -> Path | None:
     return p if p.exists() else None
 
 
-def set_reference(pdir: Path, uploaded: str) -> bool:
-    """Chuẩn hoá giọng mẫu (mono, 24 kHz, tối đa 20s). Chỉ chuyển đổi lại khi file tải lên thay đổi."""
-    src = Path(uploaded)
-    key = f"{src.name}-{src.stat().st_size}"
+def use_reference(pdir: Path, wav: Path, key: str) -> None:
+    """Đặt giọng mẫu của dự án từ thư viện. Chỉ chép lại khi giọng thay đổi (giữ cache ổn định)."""
     out, keyfile = pdir / "ref.wav", pdir / "ref.key"
     if out.exists() and keyfile.exists() and keyfile.read_text() == key:
-        return False
-    r = subprocess.run(
-        ["ffmpeg", "-y", "-loglevel", "error", "-i", str(src), "-t", "20", "-ac", "1", "-ar", str(SR), str(out)],
-        capture_output=True, text=True,
-    )
-    if r.returncode != 0:
-        raise UserError("Không đọc được file giọng mẫu: " + r.stderr.strip()[-200:])
+        return
+    shutil.copyfile(wav, out)
     keyfile.write_text(key)
-    return True
+
+
+def clear_reference(pdir: Path) -> None:
+    (pdir / "ref.wav").unlink(missing_ok=True)
+    (pdir / "ref.key").unlink(missing_ok=True)
 
 
 def _ref_fingerprint(pdir: Path) -> str:

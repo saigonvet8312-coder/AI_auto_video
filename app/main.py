@@ -6,7 +6,7 @@ from pathlib import Path
 
 import gradio as gr
 
-from . import aiimage, assemble, director, media, render, scriptkit as K, tts
+from . import aiimage, assemble, director, media, render, scriptkit as K, tts, voices
 from . import project as P
 from .jobs import run_job
 from .project import UserError
@@ -14,7 +14,7 @@ from .templates import THEMES
 
 SETTING_KEYS = [
     "brand", "tagline", "url", "theme", "custom_colors", "accent_from", "accent_to", "quality",
-    "continuous", "speed", "seed", "normalize", "ref_text", "style_json",
+    "continuous", "speed", "seed", "normalize", "voice", "style_json",
 ]
 
 
@@ -24,7 +24,8 @@ def merge_settings(vals) -> dict:
     st["speed"] = float(st["speed"] or 1.0)
     st["seed"] = int(st["seed"] or 0)
     st["brand"] = (st["brand"] or "").strip() or P.DEFAULT_SETTINGS["brand"]
-    st["ref_text"] = st["ref_text"] or ""
+    st["voice"] = "" if st["voice"] in (None, voices.NO_VOICE) else st["voice"]
+    st["ref_text"] = ""
     st["custom_colors"] = bool(st["custom_colors"])
     st["style_json"] = st["style_json"] or ""
     return st
@@ -35,14 +36,16 @@ def prepare(name: str, rows, vals, save: bool = True):
     scenes = K.complete_all(K.rows_to_scenes(rows))
     K.require_valid(scenes)
     pdir = P.project_dir(name)
+    if st["voice"]:
+        v = voices.get(st["voice"])
+        stat = v["path"].stat()
+        tts.use_reference(pdir, v["path"], f"{v['name']}-{stat.st_size}-{int(stat.st_mtime)}")
+        st["ref_text"] = v["ref_text"]
+    else:
+        tts.clear_reference(pdir)
     if save:
         P.save_project(name, scenes, st)
     return pdir, scenes, st
-
-
-def _ref_status(name: str) -> str:
-    has = tts.ref_path(P.project_dir(name)) is not None
-    return "✅ Dự án đã có giọng mẫu." if has else "⚠️ Chưa có giọng mẫu — nên tải lên để giọng đọc nhất quán."
 
 
 # ── Dự án ─────────────────────────────────────────────────────────────────────
@@ -54,7 +57,8 @@ def open_project(name):
     data = P.load_project(name)
     st = data["settings"]
     rows = K.scenes_to_rows(data["scenes"])
-    return [rows] + [st[k] for k in SETTING_KEYS] + [_ref_status(name), f"📂 Đã mở dự án **{P.slugify(name)}**.", _gallery(name)]
+    vals = [(st[k] or voices.NO_VOICE) if k == "voice" else st[k] for k in SETTING_KEYS]
+    return [rows] + vals + [f"📂 Đã mở dự án **{P.slugify(name)}** (dự án chỉ lưu trong phiên Colab này — nhớ tải kết quả về).", _gallery(name)]
 
 
 def save_project(name, rows, *vals):
@@ -62,7 +66,7 @@ def save_project(name, rows, *vals):
         prepare(name, rows, vals)
     except UserError as e:
         return f"⚠️ {e}"
-    return f"💾 Đã lưu dự án **{P.slugify(name)}** tại `{P.project_dir(name)}`."
+    return f"💾 Đã lưu dự án **{P.slugify(name)}** (tạm thời trong phiên Colab)."
 
 
 # ── ① Kịch bản ────────────────────────────────────────────────────────────────
@@ -96,6 +100,33 @@ def director_handler(rows, api_key, model, topic, use_ai, brand, style_json):
 def render_theme_label(theme: str) -> str:
     from .templates import THEMES
     return THEMES.get(theme, {}).get("label", theme)
+
+
+def voice_preview(name):
+    if not name or name == voices.NO_VOICE:
+        return None
+    try:
+        return str(voices.get(name)["path"])
+    except UserError:
+        return None
+
+
+def voice_save(name, audio, ref_text):
+    try:
+        v = voices.save(name, audio, ref_text)
+    except UserError as e:
+        raise gr.Error(str(e))
+    return gr.update(choices=voices.names(), value=v["name"]), f"💾 Đã lưu giọng **{v['name']}** vào `{voices.ROOT}`.", None, "", str(v["path"])
+
+
+def voice_delete(name):
+    if not name or name == voices.NO_VOICE:
+        raise gr.Error("Hãy chọn một giọng để xoá.")
+    try:
+        voices.delete(name)
+    except UserError as e:
+        raise gr.Error(str(e))
+    return gr.update(choices=voices.names(), value=voices.NO_VOICE), f"🗑️ Đã xoá giọng **{name}**.", None
 
 
 def style_check(text):
@@ -138,19 +169,17 @@ def ai_handler(name, force, rows, *vals):
 
 
 # ── ② Giọng đọc ───────────────────────────────────────────────────────────────
-def _job_tts(pdir, scenes, st, force, ref_upload, log):
-    if ref_upload and tts.set_reference(pdir, ref_upload):
-        log("✓ Đã lưu giọng mẫu cho dự án.")
+def _job_tts(pdir, scenes, st, force, log):
     tts.synthesize_all(pdir, scenes, st, force=force, log=log)
 
 
-def tts_handler(name, force, ref_audio, rows, *vals):
+def tts_handler(name, force, rows, *vals):
     try:
         pdir, scenes, st = prepare(name, rows, vals)
     except UserError as e:
         yield f"⚠️ {e}"
         return
-    for log, _res, _err in run_job(_job_tts, pdir, scenes, st, bool(force), ref_audio):
+    for log, _res, _err in run_job(_job_tts, pdir, scenes, st, bool(force)):
         yield log
 
 
@@ -211,16 +240,15 @@ def _job_assemble(pdir, scenes, st, log):
     return assemble.assemble(pdir, scenes, st, log=log)
 
 
-def _job_all(pdir, scenes, st, ref_upload, log):
-    if ref_upload and tts.set_reference(pdir, ref_upload):
-        log("✓ Đã lưu giọng mẫu cho dự án.")
+def _job_all(pdir, scenes, st, log):
     return assemble.run_all(pdir, scenes, st, log=log)
 
 
 def _stream_result(job, *args):
     for log, res, _err in run_job(job, *args):
         if res:
-            yield log, str(res["video"]), [str(p) for p in res.values()]
+            files = [str(res["zip"])] + [str(p) for k, p in res.items() if k != "zip"]
+            yield log, str(res["video"]), files
         else:
             yield log, gr.update(), gr.update()
 
@@ -234,13 +262,13 @@ def assemble_handler(name, rows, *vals):
     yield from _stream_result(_job_assemble, pdir, scenes, st)
 
 
-def all_handler(name, ref_audio, rows, *vals):
+def all_handler(name, rows, *vals):
     try:
         pdir, scenes, st = prepare(name, rows, vals)
     except UserError as e:
         yield f"⚠️ {e}", None, None
         return
-    yield from _stream_result(_job_all, pdir, scenes, st, ref_audio)
+    yield from _stream_result(_job_all, pdir, scenes, st)
 
 
 # ── Giao diện ─────────────────────────────────────────────────────────────────
@@ -293,10 +321,19 @@ def build_ui() -> gr.Blocks:
 
             # ② Giọng đọc ---------------------------------------------------
             with gr.Tab("② Giọng đọc"):
-                ref_audio = gr.Audio(sources=["upload", "microphone"], type="filepath",
-                                     label="Giọng mẫu (3–15 giây, rõ tiếng) — dùng để nhân bản giọng")
-                ref_status = gr.Markdown()
-                ref_text = gr.Textbox(value=d["ref_text"], label="Lời của giọng mẫu (không bắt buộc, để trống sẽ tự nhận dạng)")
+                gr.Markdown(f"**Thư viện giọng** lưu tại `{voices.ROOT}` (trên Google Drive nếu bạn đã bật ở Phần 2) — dùng lại cho mọi video.")
+                voice = gr.Dropdown(choices=voices.names(), value=d["voice"] or voices.NO_VOICE, allow_custom_value=True,
+                                    label="Chọn giọng đọc cho video này")
+                voice_audio = gr.Audio(label="Nghe thử giọng đã chọn", interactive=False)
+                with gr.Accordion("➕ Lưu giọng mới vào thư viện", open=False):
+                    new_name = gr.Textbox(label="Tên giọng", placeholder="vd: Giọng nam trầm")
+                    new_audio = gr.Audio(sources=["upload", "microphone"], type="filepath",
+                                         label="Giọng mẫu (3–15 giây, rõ tiếng, ít tạp âm)")
+                    new_text = gr.Textbox(label="Lời của giọng mẫu (không bắt buộc, để trống sẽ tự nhận dạng)")
+                    with gr.Row():
+                        voice_save_btn = gr.Button("💾 Lưu giọng", variant="primary")
+                        voice_del_btn = gr.Button("🗑️ Xoá giọng đang chọn")
+                    voice_info = gr.Markdown()
                 with gr.Row():
                     speed = gr.Slider(0.7, 1.4, value=d["speed"], step=0.05, label="Tốc độ đọc")
                     seed = gr.Number(value=d["seed"], precision=0, label="Seed")
@@ -362,23 +399,26 @@ def build_ui() -> gr.Blocks:
 
             # ④ Xuất video --------------------------------------------------
             with gr.Tab("④ Xuất video"):
-                gr.Markdown("Cần có giọng (②) và hình (③) trước. Hoặc bấm **Chạy tất cả** để làm liền mạch.")
+                gr.Markdown("Cần có giọng (②) và hình (③) trước. Hoặc bấm **Chạy tất cả** để làm liền mạch.\n\n⚠️ Dự án **không được lưu lại** sau phiên Colab — tải kết quả về ngay khi xong.")
                 with gr.Row():
                     assemble_btn = gr.Button("🎬 Ghép video cuối", variant="primary")
                     all_btn = gr.Button("🚀 Chạy tất cả (giọng → hình → ghép)")
                 out_log = gr.Textbox(lines=8, label="Nhật ký", interactive=False, autoscroll=True)
                 out_video = gr.Video(label="Video", interactive=False)
-                out_files = gr.File(label="Tệp kết quả (video.mp4 · voice.mp3 · script.txt · captions.srt)",
+                out_files = gr.File(label="Tải về: ket-qua.zip (gồm tất cả) · video.mp4 · voice.mp3 · script.txt · captions.srt",
                                     file_count="multiple", interactive=False)
 
-        settings = [brand, tagline, url, theme, custom_colors, accent_from, accent_to, quality, continuous, speed, seed, normalize, ref_text, style_json]
+        settings = [brand, tagline, url, theme, custom_colors, accent_from, accent_to, quality, continuous, speed, seed, normalize, voice, style_json]
         base = [project, table] + settings  # đầu vào chung
 
-        demo.load(open_project, [project], [table] + settings + [ref_status, status, gallery])
-        open_btn.click(open_project, [project], [table] + settings + [ref_status, status, gallery])
+        demo.load(open_project, [project], [table] + settings + [status, gallery])
+        open_btn.click(open_project, [project], [table] + settings + [status, gallery])
         save_btn.click(save_project, base, status)
 
         director_btn.click(director_handler, [table, api_key, dir_model, dir_topic, dir_ai_img, brand, style_json], [table, theme, status])
+        voice.change(voice_preview, [voice], [voice_audio])
+        voice_save_btn.click(voice_save, [new_name, new_audio, new_text], [voice, voice_info, new_audio, new_text, voice_audio])
+        voice_del_btn.click(voice_delete, [voice], [voice, voice_info, voice_audio])
         style_btn.click(style_check, [style_json], style_info)
         style_file.change(style_load, [style_file], [style_json])
         media_btn.click(media_handler, [project, media_files], [gallery, media_files, status])
@@ -386,20 +426,21 @@ def build_ui() -> gr.Blocks:
         split_btn.click(split_handler, [script_text, add_outro, brand], table)
         fill_btn.click(fill_handler, [table], table)
 
-        tts_btn.click(tts_handler, [project, force_tts, ref_audio, table] + settings, tts_log)
+        tts_btn.click(tts_handler, [project, force_tts, table] + settings, tts_log)
         listen_btn.click(listen_handler, [project, listen_idx, table] + settings, listen_audio)
 
         render_btn.click(render_handler, [project, force_render, table] + settings, render_log)
         preview_btn.click(preview_handler, [project, preview_idx, table] + settings, [render_log, preview_video])
 
         assemble_btn.click(assemble_handler, base, [out_log, out_video, out_files])
-        all_btn.click(all_handler, [project, ref_audio, table] + settings, [out_log, out_video, out_files])
+        all_btn.click(all_handler, [project, table] + settings, [out_log, out_video, out_files])
     return demo
 
 
 def main() -> None:
     P.ROOT.mkdir(parents=True, exist_ok=True)
-    allowed = [str(P.ROOT)] + [p for p in ("/content",) if Path(p).exists()]
+    voices.ROOT.mkdir(parents=True, exist_ok=True)
+    allowed = [str(P.ROOT), str(voices.ROOT)] + [p for p in ("/content",) if Path(p).exists()]
     demo = build_ui()
     demo.queue(default_concurrency_limit=1)
     demo.launch(

@@ -25,6 +25,7 @@ DEFAULT_SETTINGS = {
     "speed": 1.0,
     "seed": 1234,
     "normalize": True,
+    "voice": "",
     "ref_text": "",
     "gap": 0.25,
     "outro_hold": 2.0,
