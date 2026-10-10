@@ -11,18 +11,18 @@ Biến kịch bản của bạn thành **video dọc 9:16** có giọng đọc t
 1. Mở notebook bằng nút Colab ở trên, chọn **Runtime → Change runtime type → T4 GPU**.
 2. Chạy lần lượt 3 phần (mỗi phần là một cell riêng):
    - **Phần 1 — Cài đặt:** chỉ chạy một lần mỗi phiên Colab.
-   - **Phần 2 — Mã nguồn & thư mục dự án:** gắn Google Drive, lấy mã mới nhất.
+   - **Phần 2 — Mã nguồn & thư viện giọng:** gắn Google Drive (chỉ để lưu giọng), lấy mã mới nhất.
    - **Phần 3 — Mở giao diện:** hiện đường link, mở ở tab mới.
 3. Trong giao diện, đi qua 4 tab. Mỗi tab có nút chạy riêng:
 
 | Tab | Việc làm |
 |---|---|
 | ① Kịch bản | Dán kịch bản, tách cảnh, chỉnh sửa trong bảng |
-| ② Giọng đọc | Tải giọng mẫu, tạo giọng từng cảnh, nghe thử |
+| ② Giọng đọc | Chọn giọng trong thư viện (hoặc lưu giọng mới), tạo giọng từng cảnh, nghe thử |
 | ③ Hình ảnh | Chọn chủ đề, thương hiệu, thư viện ảnh/ảnh AI, dựng hình, xem thử từng cảnh |
 | ④ Xuất video | Ghép video cuối, hoặc “Chạy tất cả” |
 
-Kết quả nằm trong `<thư mục dự án>/<tên dự án>/`: `video.mp4`, `voice.mp3`, `script.txt`, `captions.srt`.
+Kết quả tải về ở tab ④: `ket-qua.zip` (gồm `video.mp4`, `voice.mp3`, `script.txt`, `captions.srt`) hoặc từng file.
 
 ## Làm video bớt nhàm chán
 
@@ -46,9 +46,10 @@ Kết quả nằm trong `<thư mục dự án>/<tên dự án>/`: `video.mp4`, `
 
 Cột **Ảnh nền** của từng cảnh chỉ cần mô tả **chủ thể** (ví dụ `a robot hand holding a glowing smartphone`); phong cách lấy từ JSON. Đổi JSON thì ảnh được tạo mới, còn đổi chủ đề giao diện thì ảnh giữ nguyên. Đạo diễn AI cũng đọc JSON này để viết mô tả chủ thể cho hợp phong cách.
 
-## Chạy từng phần, không mất công
+## Lưu trữ
 
-Mọi bước đều **lưu kết quả và dùng lại**. Sửa một cảnh thì chỉ cảnh đó được tạo giọng/dựng hình lại. Dự án lưu trên Google Drive nên Colab ngắt kết nối vẫn mở lại làm tiếp được.
+- **Dự án không được lưu lại** sau phiên Colab: làm xong thì tải kết quả về. Trong lúc làm, từng bước vẫn được nhớ: sửa một cảnh thì chỉ cảnh đó được tạo giọng/dựng hình lại.
+- **Chỉ thư viện giọng đọc được lưu trên Google Drive** (thư mục `AI_auto_video_voices`). Lưu một giọng ở tab ② (tên + file mẫu 3–15 giây + lời của mẫu nếu có), lần sau chọn trong danh sách.
 
 ## Bảng kịch bản
 
@@ -88,7 +89,7 @@ app/
 | Triệu chứng | Cách xử lý |
 |---|---|
 | Phần 1 báo cần khởi động lại | Restart session rồi chạy lại từ Phần 1 |
-| Giọng mỗi cảnh một khác | Tải **giọng mẫu** ở tab ② |
+| Giọng mỗi cảnh một khác | Chọn một **giọng trong thư viện** ở tab ② |
 | Dựng hình lâu | Chọn chất lượng “Nhanh”, tắt “Nền chuyển động suốt cảnh” |
 | Chữ tiếng Việt lỗi dấu | Chạy lại Phần 1 (cài font) |
 | Muốn làm lại một bước | Tick “Tạo lại / Dựng lại từ đầu” rồi chạy |
