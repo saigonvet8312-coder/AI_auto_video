@@ -31,6 +31,21 @@ Kết quả nằm trong `<thư mục dự án>/<tên dự án>/`: `video.mp4`, `
 - **Ảnh nền cho từng cảnh** (cột “Ảnh nền”): tên file đã tải lên thư viện, đường link ảnh, hoặc **một mô tả để AI tạo ảnh** (tab ③ → “Tạo ảnh AI”). Cảnh có ảnh nền có chuyển động máy quay.
 - **Đạo diễn AI** (tab ①, tuỳ chọn, cần Anthropic API key): Claude đọc kịch bản rồi chọn chủ đề, mẫu cảnh, chữ ngắn gọn và mô tả ảnh nền cho từng cảnh.
 
+## Phong cách ảnh AI riêng (JSON)
+
+Ảnh AI luôn được tạo theo **JSON phong cách do bạn cung cấp cho từng video** (tab ③ → “Phong cách ảnh AI”, dán JSON hoặc tải file `.json`). Mẫu nằm ở `examples/style-cosmic-tech-brain.json`.
+
+| Trường | Ý nghĩa |
+|---|---|
+| `style_name` | Tên phong cách |
+| `full_prompt_string` | **Bắt buộc.** Mô tả phong cách chung |
+| `composition` | Bố cục |
+| `lighting` | Ánh sáng |
+| `color_palette` | Bảng màu |
+| `negative_prompt` | Những thứ cần tránh |
+
+Cột **Ảnh nền** của từng cảnh chỉ cần mô tả **chủ thể** (ví dụ `a robot hand holding a glowing smartphone`); phong cách lấy từ JSON. Đổi JSON thì ảnh được tạo mới, còn đổi chủ đề giao diện thì ảnh giữ nguyên. Đạo diễn AI cũng đọc JSON này để viết mô tả chủ thể cho hợp phong cách.
+
 ## Chạy từng phần, không mất công
 
 Mọi bước đều **lưu kết quả và dùng lại**. Sửa một cảnh thì chỉ cảnh đó được tạo giọng/dựng hình lại. Dự án lưu trên Google Drive nên Colab ngắt kết nối vẫn mở lại làm tiếp được.
