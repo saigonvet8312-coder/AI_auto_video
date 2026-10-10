@@ -3,13 +3,13 @@ from __future__ import annotations
 
 import base64
 import io
+import json
 import os
 import re
 import shutil
 from pathlib import Path
 
 from .project import UserError, digest
-from .templates import THEMES
 
 IMG_EXT = (".jpg", ".jpeg", ".png", ".webp", ".gif")
 AI_MODEL = os.environ.get("AVG_AI_MODEL", "segmind/SSD-1B")
@@ -37,14 +37,55 @@ def save_uploads(pdir: Path, files) -> list[str]:
     return saved
 
 
-def ai_prompt_full(prompt: str, st: dict) -> str:
-    style = THEMES.get(st.get("theme"), THEMES["aurora"])["style"]
-    return f"{prompt.strip()}, {style}, vertical composition, no text, no watermark, no logo"
+NEGATIVE_BASE = "text, letters, watermark, logo, signature, blurry, low quality, deformed, extra limbs, cropped"
+STYLE_FIELDS = ("full_prompt_string", "composition", "lighting", "color_palette", "negative_prompt")
+
+
+def parse_style(text: str | None) -> dict | None:
+    """Đọc JSON phong cách ảnh do người dùng cung cấp. Trả None nếu để trống."""
+    t = (text or "").strip()
+    if not t:
+        return None
+    try:
+        data = json.loads(t)
+    except json.JSONDecodeError as e:
+        raise UserError(f"JSON phong cách chưa hợp lệ: {e.msg} (dòng {e.lineno}, cột {e.colno}).")
+    if isinstance(data, list) and data and isinstance(data[0], dict):
+        data = data[0]
+    if not isinstance(data, dict) or not str(data.get("full_prompt_string", "")).strip():
+        raise UserError("JSON phong cách cần có trường \"full_prompt_string\".")
+    style = {k: str(data.get(k, "") or "").strip() for k in STYLE_FIELDS}
+    style["style_name"] = str(data.get("style_name", "") or "").strip() or "phong cách riêng"
+    return style
+
+
+def require_style(st: dict) -> dict:
+    style = parse_style(st.get("style_json"))
+    if style is None:
+        raise UserError("Chưa có JSON phong cách ảnh. Hãy dán JSON ở tab ③ → “Phong cách ảnh AI” trước khi tạo ảnh AI.")
+    return style
+
+
+def ai_prompts(subject: str, style: dict) -> tuple[str, str, str]:
+    """(prompt chính, prompt phụ cho bộ mã hoá thứ hai của SDXL, negative). Chủ thể luôn đứng đầu."""
+    subject = subject.strip()
+    p1 = ", ".join(x for x in (subject, style["full_prompt_string"]) if x)
+    p2 = ", ".join(x for x in (subject, style["composition"], style["lighting"], style["color_palette"]) if x)
+    neg = ", ".join(x for x in (style["negative_prompt"], NEGATIVE_BASE) if x)
+    return p1, p2, neg
+
+
+def _style_fp(st: dict) -> str:
+    raw = (st.get("style_json") or "").strip()
+    try:
+        return json.dumps(json.loads(raw), sort_keys=True, ensure_ascii=False) if raw else ""
+    except json.JSONDecodeError:
+        return raw
 
 
 def ai_path(pdir: Path, prompt: str, st: dict) -> Path:
-    # Không phụ thuộc chủ đề: đổi chủ đề không làm mất ảnh đã tạo (muốn ảnh theo phong cách mới thì bấm “Tạo lại”).
-    key = digest(prompt.strip(), AI_MODEL, AI_SIZE, st.get("seed"))
+    # Phụ thuộc mô tả + JSON phong cách (đổi phong cách ⇒ tạo ảnh mới), không phụ thuộc chủ đề giao diện.
+    key = digest(prompt.strip(), _style_fp(st), AI_MODEL, AI_SIZE, st.get("seed"))
     return media_dir(pdir) / f"ai-{key}.png"
 
 

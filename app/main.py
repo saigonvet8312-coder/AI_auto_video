@@ -14,7 +14,7 @@ from .templates import THEMES
 
 SETTING_KEYS = [
     "brand", "tagline", "url", "theme", "custom_colors", "accent_from", "accent_to", "quality",
-    "continuous", "speed", "seed", "normalize", "ref_text",
+    "continuous", "speed", "seed", "normalize", "ref_text", "style_json",
 ]
 
 
@@ -26,6 +26,7 @@ def merge_settings(vals) -> dict:
     st["brand"] = (st["brand"] or "").strip() or P.DEFAULT_SETTINGS["brand"]
     st["ref_text"] = st["ref_text"] or ""
     st["custom_colors"] = bool(st["custom_colors"])
+    st["style_json"] = st["style_json"] or ""
     return st
 
 
@@ -76,11 +77,14 @@ def fill_handler(rows):
     return K.scenes_to_rows(K.complete_all(K.rows_to_scenes(rows)))
 
 
-def director_handler(rows, api_key, model, topic, use_ai, brand):
+def director_handler(rows, api_key, model, topic, use_ai, brand, style_json):
     scenes = K.rows_to_scenes(rows)
     try:
+        style = media.parse_style(style_json)
+        if use_ai and style is None:
+            raise UserError("Hãy dán JSON phong cách ảnh ở tab ③ trước (hoặc bỏ tick “Để AI mô tả ảnh nền”).")
         theme, designed = director.direct(
-            scenes, api_key, model or director.DEFAULT_MODEL, topic or "", (brand or "").strip(), bool(use_ai))
+            scenes, api_key, model or director.DEFAULT_MODEL, topic or "", (brand or "").strip(), bool(use_ai), style)
     except UserError as e:
         raise gr.Error(str(e))
     except Exception as e:  # noqa: BLE001
@@ -92,6 +96,24 @@ def director_handler(rows, api_key, model, topic, use_ai, brand):
 def render_theme_label(theme: str) -> str:
     from .templates import THEMES
     return THEMES.get(theme, {}).get("label", theme)
+
+
+def style_check(text):
+    try:
+        style = media.parse_style(text)
+    except UserError as e:
+        return f"⚠️ {e}"
+    if style is None:
+        return "ℹ️ Chưa có JSON phong cách."
+    filled = [k for k in media.STYLE_FIELDS if style[k]]
+    return f"✅ Hợp lệ — **{style['style_name']}** · các trường có dữ liệu: {', '.join(filled)}"
+
+
+def style_load(file):
+    if not file:
+        return gr.update()
+    path = getattr(file, "name", file)
+    return Path(path).read_text(encoding="utf-8")
 
 
 def media_handler(name, files):
@@ -307,6 +329,21 @@ def build_ui() -> gr.Blocks:
                     )
                 continuous = gr.Checkbox(value=d["continuous"],
                                          label="Nền chuyển động suốt cảnh (đẹp hơn nhưng dựng lâu hơn)")
+                with gr.Accordion("🎨 Phong cách ảnh AI của bạn (JSON) — bắt buộc khi dùng ảnh AI", open=True):
+                    style_json = gr.Textbox(
+                        lines=10, label="Dán JSON phong cách (mỗi video một JSON)",
+                        placeholder='{"style_name": "...", "full_prompt_string": "...", "composition": "...", '
+                                    '"lighting": "...", "color_palette": "...", "negative_prompt": "..."}',
+                    )
+                    with gr.Row():
+                        style_file = gr.File(file_types=[".json"], label="…hoặc tải file .json")
+                        style_btn = gr.Button("✔ Kiểm tra JSON")
+                    style_info = gr.Markdown()
+                    gr.Markdown(
+                        "Các trường: `style_name`, **`full_prompt_string`** (bắt buộc), `composition`, `lighting`, "
+                        "`color_palette`, `negative_prompt`. Mô tả ở cột *Ảnh nền* của từng cảnh chỉ cần nói về **chủ thể**, "
+                        "phần còn lại lấy từ JSON này."
+                    )
                 with gr.Accordion("🖼️ Thư viện ảnh nền & ảnh AI", open=False):
                     media_files = gr.File(file_count="multiple", file_types=["image"], label="Tải ảnh lên (dùng tên file trong cột Ảnh nền)")
                     media_btn = gr.Button("📥 Thêm vào thư viện")
@@ -334,14 +371,16 @@ def build_ui() -> gr.Blocks:
                 out_files = gr.File(label="Tệp kết quả (video.mp4 · voice.mp3 · script.txt · captions.srt)",
                                     file_count="multiple", interactive=False)
 
-        settings = [brand, tagline, url, theme, custom_colors, accent_from, accent_to, quality, continuous, speed, seed, normalize, ref_text]
+        settings = [brand, tagline, url, theme, custom_colors, accent_from, accent_to, quality, continuous, speed, seed, normalize, ref_text, style_json]
         base = [project, table] + settings  # đầu vào chung
 
         demo.load(open_project, [project], [table] + settings + [ref_status, status, gallery])
         open_btn.click(open_project, [project], [table] + settings + [ref_status, status, gallery])
         save_btn.click(save_project, base, status)
 
-        director_btn.click(director_handler, [table, api_key, dir_model, dir_topic, dir_ai_img, brand], [table, theme, status])
+        director_btn.click(director_handler, [table, api_key, dir_model, dir_topic, dir_ai_img, brand, style_json], [table, theme, status])
+        style_btn.click(style_check, [style_json], style_info)
+        style_file.change(style_load, [style_file], [style_json])
         media_btn.click(media_handler, [project, media_files], [gallery, media_files, status])
         ai_btn.click(ai_handler, [project, force_ai, table] + settings, render_log)
         split_btn.click(split_handler, [script_text, add_outro, brand], table)

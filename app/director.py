@@ -36,10 +36,13 @@ CHỈ TRẢ VỀ MỘT ĐỐI TƯỢNG JSON, không markdown, không giải thí
 Số phần tử trong "scenes" PHẢI bằng số cảnh đầu vào, đúng thứ tự."""
 
 
-def build_system(use_ai_images: bool) -> str:
+def build_system(use_ai_images: bool, style: dict | None = None) -> str:
     themes = "\n".join(f"- {k}: {v['label']}" for k, v in THEMES.items())
     rule = ("Đặt bg cho khoảng một nửa số cảnh (hero và mọi cảnh image luôn có); các cảnh khác để trống."
             if use_ai_images else "Để bg trống ở mọi cảnh.")
+    if use_ai_images and style:
+        rule += (f" PHONG CÁCH ẢNH ĐÃ ĐƯỢC CỐ ĐỊNH ({style['style_name']}: {style['full_prompt_string'][:240]}). "
+                 "Vì vậy bg CHỈ mô tả CHỦ THỂ/hình ảnh chính của cảnh (không lặp lại phong cách, ánh sáng, màu sắc).")
     return SYSTEM.format(themes=themes, bg_rule=rule)
 
 
@@ -82,7 +85,7 @@ def parse(text: str, n: int) -> tuple[str, list[dict]]:
 
 
 def direct(scenes: list[dict], api_key: str, model: str = DEFAULT_MODEL, topic: str = "",
-           brand: str = "", use_ai_images: bool = True, client=None, log=print) -> tuple[str, list[dict]]:
+           brand: str = "", use_ai_images: bool = True, style: dict | None = None, client=None, log=print) -> tuple[str, list[dict]]:
     """Trả về (chủ_đề, danh_sách_cảnh_đã_thiết_kế). Giữ nguyên lời đọc."""
     if not scenes or any(not s["voice"].strip() for s in scenes):
         raise UserError("Cần có lời đọc ở mọi cảnh trước khi nhờ đạo diễn AI.")
@@ -92,7 +95,7 @@ def direct(scenes: list[dict], api_key: str, model: str = DEFAULT_MODEL, topic: 
         from anthropic import Anthropic
 
         client = Anthropic(api_key=api_key.strip())
-    system = build_system(use_ai_images)
+    system = build_system(use_ai_images, style)
     msgs = [{"role": "user", "content": build_user(scenes, topic, brand)}]
     last_err = ""
     for attempt in range(2):

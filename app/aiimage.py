@@ -9,7 +9,6 @@ from pathlib import Path
 from . import media
 from .project import UserError
 
-NEGATIVE = "text, letters, watermark, logo, signature, blurry, low quality, deformed, extra limbs, cropped"
 STEPS = 25
 GUIDANCE = 8.0
 
@@ -55,14 +54,17 @@ def generate_all(pdir: Path, scenes: list[dict], st: dict, force: bool = False, 
 
     import torch
 
+    style = media.require_style(st)
+    log(f"🎨 Phong cách: {style['style_name']}")
     pipe = _load(log)
     w, h = media.AI_SIZE
     try:
         for k, (i, prompt, path) in enumerate(targets, 1):
             log(f"🎨 Ảnh {k}/{len(targets)} (cảnh {i + 1}): {prompt[:70]}")
             gen = torch.Generator("cuda").manual_seed(int(st["seed"]) + i)
+            p1, p2, neg = media.ai_prompts(prompt, style)
             img = pipe(
-                prompt=media.ai_prompt_full(prompt, st), negative_prompt=NEGATIVE, width=w, height=h,
+                prompt=p1, prompt_2=p2, negative_prompt=neg, negative_prompt_2=neg, width=w, height=h,
                 num_inference_steps=STEPS, guidance_scale=GUIDANCE, generator=gen,
             ).images[0]
             img.save(path)
