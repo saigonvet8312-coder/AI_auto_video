@@ -19,10 +19,17 @@ Biến kịch bản của bạn thành **video dọc 9:16** có giọng đọc t
 |---|---|
 | ① Kịch bản | Dán kịch bản, tách cảnh, chỉnh sửa trong bảng |
 | ② Giọng đọc | Tải giọng mẫu, tạo giọng từng cảnh, nghe thử |
-| ③ Hình ảnh | Đặt thương hiệu/màu, dựng hình, xem thử từng cảnh |
+| ③ Hình ảnh | Chọn chủ đề, thương hiệu, thư viện ảnh/ảnh AI, dựng hình, xem thử từng cảnh |
 | ④ Xuất video | Ghép video cuối, hoặc “Chạy tất cả” |
 
 Kết quả nằm trong `<thư mục dự án>/<tên dự án>/`: `video.mp4`, `voice.mp3`, `script.txt`, `captions.srt`.
+
+## Làm video bớt nhàm chán
+
+- **6 chủ đề hình ảnh** (tab ③): Cực quang, Neon công nghệ, Điện ảnh tối, Giấy sáng, Hoàng hôn, Tối giản đậm. Mỗi chủ đề có nền, màu, kiểu chữ và hiệu ứng riêng; đổi chủ đề không cần tạo lại giọng.
+- **8 mẫu cảnh:** hero, stat (số tự chạy lên), statement (từ khoá được tô sáng), list, quote, compare, image, outro. Mẫu và hiệu ứng vào cảnh được tự luân phiên để các cảnh không giống nhau.
+- **Ảnh nền cho từng cảnh** (cột “Ảnh nền”): tên file đã tải lên thư viện, đường link ảnh, hoặc **một mô tả để AI tạo ảnh** (tab ③ → “Tạo ảnh AI”). Cảnh có ảnh nền có chuyển động máy quay.
+- **Đạo diễn AI** (tab ①, tuỳ chọn, cần Anthropic API key): Claude đọc kịch bản rồi chọn chủ đề, mẫu cảnh, chữ ngắn gọn và mô tả ảnh nền cho từng cảnh.
 
 ## Chạy từng phần, không mất công
 
@@ -34,11 +41,12 @@ Chỉ cần điền cột **Lời đọc**, các ô trống còn lại được 
 
 | Cột | Ý nghĩa |
 |---|---|
-| Mẫu | `hero` · `stat` · `statement` · `list` · `outro` |
+| Mẫu | `hero` · `stat` · `statement` · `list` · `quote` · `compare` · `image` · `outro` |
 | Nhãn | Chữ nhỏ phía trên tiêu đề |
-| Tiêu đề | Chữ lớn trên màn hình (`|` để xuống dòng) |
+| Tiêu đề | Chữ lớn trên màn hình (`|` xuống dòng, `*từ khoá*` để tô sáng) |
 | Phụ đề | Dòng mô tả bên dưới |
 | Danh sách | Các mục của mẫu `list`, cách nhau bằng `|` |
+| Ảnh nền | Tên file trong thư viện, link ảnh, hoặc mô tả để AI tạo ảnh |
 | Lời đọc | Nội dung được đọc. Số, %, đơn vị (MP, GB, mAh…) tự đọc thành chữ |
 
 ## Cấu trúc mã
@@ -50,7 +58,10 @@ app/
   scriptkit.py   tách cảnh, điền tự động, kiểm tra
   vnnum.py       đọc số/ký hiệu thành chữ tiếng Việt
   tts.py         tạo giọng bằng OmniVoice, có cache
-  templates.py   5 mẫu hình ảnh (HTML/CSS)
+  templates.py   6 chủ đề + 8 mẫu cảnh (HTML/CSS)
+  media.py       ảnh nền: tải lên, link, ảnh AI
+  aiimage.py     tạo ảnh nền bằng AI
+  director.py    đạo diễn AI (Claude)
   render.py      dựng hình bằng Chromium + FFmpeg
   assemble.py    ghép video, trộn âm thanh, xuất phụ đề
   jobs.py        chạy nền, phát nhật ký trực tiếp
@@ -69,4 +80,4 @@ app/
 
 ## Giấy phép các thành phần
 
-Giọng đọc: [OmniVoice](https://github.com/k2-fsa/OmniVoice) (Apache-2.0) · Trình duyệt tự động: Playwright (Apache-2.0) · Giao diện: Gradio (Apache-2.0) · FFmpeg.
+Giọng đọc: [OmniVoice](https://github.com/k2-fsa/OmniVoice) (Apache-2.0) · Ảnh AI: segmind/SSD-1B (Apache-2.0, đổi được bằng biến `AVG_AI_MODEL`) · Trình duyệt tự động: Playwright (Apache-2.0) · Giao diện: Gradio (Apache-2.0) · FFmpeg.
