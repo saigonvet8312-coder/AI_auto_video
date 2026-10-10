@@ -6,15 +6,18 @@ from pathlib import Path
 
 import gradio as gr
 
-from . import aiimage, assemble, director, media, render, scriptkit as K, tts, voices
+from . import aiimage, assemble, autobg, director, media, render, scriptkit as K, tts, voices
 from . import project as P
 from .jobs import run_job
 from .project import UserError
 from .templates import THEMES
 
+# Khoá API chỉ giữ trong bộ nhớ phiên này, không bao giờ lưu vào dự án.
+RUNTIME = {"api_key": "", "model": director.DEFAULT_MODEL}
+
 SETTING_KEYS = [
     "brand", "tagline", "url", "theme", "custom_colors", "accent_from", "accent_to", "quality",
-    "continuous", "speed", "seed", "normalize", "voice", "style_json",
+    "continuous", "speed", "seed", "normalize", "voice", "style_json", "auto_images",
 ]
 
 
@@ -28,10 +31,11 @@ def merge_settings(vals) -> dict:
     st["ref_text"] = ""
     st["custom_colors"] = bool(st["custom_colors"])
     st["style_json"] = st["style_json"] or ""
+    st["auto_images"] = bool(st["auto_images"])
     return st
 
 
-def prepare(name: str, rows, vals, save: bool = True):
+def prepare(name: str, rows, vals, save: bool = True, auto: bool = False, log=print):
     st = merge_settings(vals)
     scenes = K.complete_all(K.rows_to_scenes(rows))
     K.require_valid(scenes)
@@ -43,6 +47,8 @@ def prepare(name: str, rows, vals, save: bool = True):
         st["ref_text"] = v["ref_text"]
     else:
         tts.clear_reference(pdir)
+    if auto:
+        autobg.fill(pdir, scenes, st, RUNTIME["api_key"], RUNTIME["model"], log=log)
     if save:
         P.save_project(name, scenes, st)
     return pdir, scenes, st
@@ -158,14 +164,43 @@ def _job_ai(pdir, scenes, st, force, log):
     aiimage.generate_all(pdir, scenes, st, force=force, log=log)
 
 
+def _ai_gallery(pdir, scenes, st):
+    items = []
+    for i, sc in enumerate(scenes):
+        try:
+            p = media.resolve(pdir, sc, st, download=False)
+        except UserError:
+            p = None
+        if p is not None:
+            items.append((str(p), f"Cảnh {i + 1}: {sc['bg'][:60]}"))
+    return items
+
+
 def ai_handler(name, force, rows, *vals):
     try:
-        pdir, scenes, st = prepare(name, rows, vals)
+        pdir, scenes, st = prepare(name, rows, vals, auto=True)
     except UserError as e:
-        yield f"⚠️ {e}"
+        yield f"⚠️ {e}", gr.update()
         return
     for log, _res, _err in run_job(_job_ai, pdir, scenes, st, bool(force)):
-        yield log
+        yield log, gr.update()
+    yield log, _ai_gallery(pdir, scenes, st)
+
+
+def fill_bg_handler(name, rows, *vals):
+    """Điền sẵn mô tả ảnh vào bảng để bạn xem và sửa trước khi tạo ảnh."""
+    try:
+        pdir, scenes, st = prepare(name, rows, vals, save=False, auto=True)
+    except UserError as e:
+        raise gr.Error(str(e))
+    if media.parse_style(st["style_json"]) is None:
+        raise gr.Error("Hãy dán JSON phong cách ở trên trước.")
+    return K.scenes_to_rows(scenes), "🪄 Đã điền mô tả ảnh vào cột “Ảnh nền”. Bạn có thể sửa rồi bấm “Tạo ảnh AI”."
+
+
+def set_runtime(api_key, model):
+    RUNTIME["api_key"] = (api_key or "").strip()
+    RUNTIME["model"] = (model or "").strip() or director.DEFAULT_MODEL
 
 
 # ── ② Giọng đọc ───────────────────────────────────────────────────────────────
@@ -204,12 +239,15 @@ def _job_render(pdir, scenes, st, force, log):
         v = tts.voice_info(pdir, i, sc, st)
         if v:
             durations[i] = v[1]
+    if not any(media.has_bg(pdir, sc) for sc in scenes):
+        log("ℹ️ Chưa có ảnh nền nào nên cảnh chỉ có nền màu của chủ đề. Dán JSON phong cách ở tab ③ (bật “Tự tạo ảnh AI”) "
+            "rồi bấm “Tạo ảnh AI” để có ảnh theo phong cách của bạn.")
     render.render_scenes(pdir, scenes, st, durations or None, force=force, log=log)
 
 
 def render_handler(name, force, rows, *vals):
     try:
-        pdir, scenes, st = prepare(name, rows, vals)
+        pdir, scenes, st = prepare(name, rows, vals, auto=True)
     except UserError as e:
         yield f"⚠️ {e}"
         return
@@ -223,7 +261,7 @@ def _job_preview(pdir, scenes, st, i, log):
 
 def preview_handler(name, idx, rows, *vals):
     try:
-        pdir, scenes, st = prepare(name, rows, vals, save=False)
+        pdir, scenes, st = prepare(name, rows, vals, save=False, auto=True)
     except UserError as e:
         yield f"⚠️ {e}", None
         return
@@ -255,7 +293,7 @@ def _stream_result(job, *args):
 
 def assemble_handler(name, rows, *vals):
     try:
-        pdir, scenes, st = prepare(name, rows, vals)
+        pdir, scenes, st = prepare(name, rows, vals, auto=True)
     except UserError as e:
         yield f"⚠️ {e}", None, None
         return
@@ -264,7 +302,7 @@ def assemble_handler(name, rows, *vals):
 
 def all_handler(name, rows, *vals):
     try:
-        pdir, scenes, st = prepare(name, rows, vals)
+        pdir, scenes, st = prepare(name, rows, vals, auto=True)
     except UserError as e:
         yield f"⚠️ {e}", None, None
         return
@@ -299,7 +337,7 @@ def build_ui() -> gr.Blocks:
                     split_btn = gr.Button("✂️ Tách thành các cảnh", variant="primary")
                     fill_btn = gr.Button("🪄 Điền tự động các ô trống")
                 with gr.Accordion("✨ Đạo diễn AI — tự chọn chủ đề, mẫu cảnh, chữ và mô tả ảnh nền (tuỳ chọn)", open=False):
-                    api_key = gr.Textbox(type="password", label="Anthropic API key (không lưu vào dự án)")
+                    api_key = gr.Textbox(type="password", label="Anthropic API key (không lưu vào dự án) — dùng cho Đạo diễn AI và để viết mô tả ảnh sát nội dung hơn")
                     with gr.Row():
                         dir_model = gr.Textbox(value=director.DEFAULT_MODEL, label="Mô hình")
                         dir_topic = gr.Textbox(label="Chủ đề / phong cách mong muốn (không bắt buộc)",
@@ -375,6 +413,8 @@ def build_ui() -> gr.Blocks:
                     with gr.Row():
                         style_file = gr.File(file_types=[".json"], label="…hoặc tải file .json")
                         style_btn = gr.Button("✔ Kiểm tra JSON")
+                    auto_images = gr.Checkbox(value=d["auto_images"],
+                                              label="Tự tạo ảnh AI cho MỌI cảnh theo JSON này (mô tả chủ thể tự viết từ kịch bản)")
                     style_info = gr.Markdown()
                     gr.Markdown(
                         "Các trường: `style_name`, **`full_prompt_string`** (bắt buộc), `composition`, `lighting`, "
@@ -386,8 +426,10 @@ def build_ui() -> gr.Blocks:
                     media_btn = gr.Button("📥 Thêm vào thư viện")
                     gallery = gr.Gallery(label="Thư viện ảnh của dự án", columns=6, height=220, interactive=False)
                     with gr.Row():
+                        fill_bg_btn = gr.Button("🪄 Điền mô tả ảnh vào bảng (để xem/sửa)")
                         force_ai = gr.Checkbox(value=False, label="Tạo lại ảnh AI từ đầu")
-                        ai_btn = gr.Button("🎨 Tạo ảnh AI cho các cảnh có mô tả")
+                        ai_btn = gr.Button("🎨 Tạo ảnh AI cho các cảnh", variant="primary")
+                    ai_gallery = gr.Gallery(label="Ảnh AI đã tạo", columns=5, height=260, interactive=False)
                 with gr.Row():
                     force_render = gr.Checkbox(value=False, label="Dựng lại từ đầu (bỏ qua hình đã có)")
                     render_btn = gr.Button("🖼️ Dựng hình các cảnh", variant="primary")
@@ -408,7 +450,7 @@ def build_ui() -> gr.Blocks:
                 out_files = gr.File(label="Tải về: ket-qua.zip (gồm tất cả) · video.mp4 · voice.mp3 · script.txt · captions.srt",
                                     file_count="multiple", interactive=False)
 
-        settings = [brand, tagline, url, theme, custom_colors, accent_from, accent_to, quality, continuous, speed, seed, normalize, voice, style_json]
+        settings = [brand, tagline, url, theme, custom_colors, accent_from, accent_to, quality, continuous, speed, seed, normalize, voice, style_json, auto_images]
         base = [project, table] + settings  # đầu vào chung
 
         demo.load(open_project, [project], [table] + settings + [status, gallery])
@@ -422,7 +464,10 @@ def build_ui() -> gr.Blocks:
         style_btn.click(style_check, [style_json], style_info)
         style_file.change(style_load, [style_file], [style_json])
         media_btn.click(media_handler, [project, media_files], [gallery, media_files, status])
-        ai_btn.click(ai_handler, [project, force_ai, table] + settings, render_log)
+        ai_btn.click(ai_handler, [project, force_ai, table] + settings, [render_log, ai_gallery])
+        fill_bg_btn.click(fill_bg_handler, [project, table] + settings, [table, status])
+        api_key.change(set_runtime, [api_key, dir_model], None)
+        dir_model.change(set_runtime, [api_key, dir_model], None)
         split_btn.click(split_handler, [script_text, add_outro, brand], table)
         fill_btn.click(fill_handler, [table], table)
 

@@ -15,6 +15,7 @@ DEFAULT_SETTINGS = {
     "tagline": "Nội dung mới mỗi ngày",
     "url": "",
     "style_json": "",
+    "auto_images": True,
     "theme": "aurora",
     "custom_colors": False,
     "accent_from": "#F59E0B",
