@@ -6,13 +6,14 @@ from pathlib import Path
 
 import gradio as gr
 
-from . import assemble, render, scriptkit as K, tts
+from . import aiimage, assemble, director, media, render, scriptkit as K, tts
 from . import project as P
 from .jobs import run_job
 from .project import UserError
+from .templates import THEMES
 
 SETTING_KEYS = [
-    "brand", "tagline", "url", "accent_from", "accent_to", "quality",
+    "brand", "tagline", "url", "theme", "custom_colors", "accent_from", "accent_to", "quality",
     "continuous", "speed", "seed", "normalize", "ref_text",
 ]
 
@@ -24,6 +25,7 @@ def merge_settings(vals) -> dict:
     st["seed"] = int(st["seed"] or 0)
     st["brand"] = (st["brand"] or "").strip() or P.DEFAULT_SETTINGS["brand"]
     st["ref_text"] = st["ref_text"] or ""
+    st["custom_colors"] = bool(st["custom_colors"])
     return st
 
 
@@ -43,11 +45,15 @@ def _ref_status(name: str) -> str:
 
 
 # ── Dự án ─────────────────────────────────────────────────────────────────────
+def _gallery(name: str):
+    return [(str(p), p.name) for p in media.list_media(P.project_dir(name))]
+
+
 def open_project(name):
     data = P.load_project(name)
     st = data["settings"]
     rows = K.scenes_to_rows(data["scenes"])
-    return [rows] + [st[k] for k in SETTING_KEYS] + [_ref_status(name), f"📂 Đã mở dự án **{P.slugify(name)}**."]
+    return [rows] + [st[k] for k in SETTING_KEYS] + [_ref_status(name), f"📂 Đã mở dự án **{P.slugify(name)}**.", _gallery(name)]
 
 
 def save_project(name, rows, *vals):
@@ -68,6 +74,45 @@ def split_handler(text, add_outro, brand):
 
 def fill_handler(rows):
     return K.scenes_to_rows(K.complete_all(K.rows_to_scenes(rows)))
+
+
+def director_handler(rows, api_key, model, topic, use_ai, brand):
+    scenes = K.rows_to_scenes(rows)
+    try:
+        theme, designed = director.direct(
+            scenes, api_key, model or director.DEFAULT_MODEL, topic or "", (brand or "").strip(), bool(use_ai))
+    except UserError as e:
+        raise gr.Error(str(e))
+    except Exception as e:  # noqa: BLE001
+        raise gr.Error(f"Đạo diễn AI gặp lỗi: {e}")
+    label = render_theme_label(theme)
+    return K.scenes_to_rows(designed), theme, f"✨ Đạo diễn AI đã thiết kế {len(designed)} cảnh · chủ đề **{label}**."
+
+
+def render_theme_label(theme: str) -> str:
+    from .templates import THEMES
+    return THEMES.get(theme, {}).get("label", theme)
+
+
+def media_handler(name, files):
+    if not files:
+        raise gr.Error("Hãy chọn ảnh trước.")
+    saved = media.save_uploads(P.project_dir(name), files)
+    return _gallery(name), None, f"🖼️ Đã thêm {len(saved)} ảnh: " + ", ".join(f"`{n}`" for n in saved)
+
+
+def _job_ai(pdir, scenes, st, force, log):
+    aiimage.generate_all(pdir, scenes, st, force=force, log=log)
+
+
+def ai_handler(name, force, rows, *vals):
+    try:
+        pdir, scenes, st = prepare(name, rows, vals)
+    except UserError as e:
+        yield f"⚠️ {e}"
+        return
+    for log, _res, _err in run_job(_job_ai, pdir, scenes, st, bool(force)):
+        yield log
 
 
 # ── ② Giọng đọc ───────────────────────────────────────────────────────────────
@@ -203,15 +248,24 @@ def build_ui() -> gr.Blocks:
                     add_outro = gr.Checkbox(value=True, label="Tự thêm cảnh kết (outro)")
                     split_btn = gr.Button("✂️ Tách thành các cảnh", variant="primary")
                     fill_btn = gr.Button("🪄 Điền tự động các ô trống")
+                with gr.Accordion("✨ Đạo diễn AI — tự chọn chủ đề, mẫu cảnh, chữ và mô tả ảnh nền (tuỳ chọn)", open=False):
+                    api_key = gr.Textbox(type="password", label="Anthropic API key (không lưu vào dự án)")
+                    with gr.Row():
+                        dir_model = gr.Textbox(value=director.DEFAULT_MODEL, label="Mô hình")
+                        dir_topic = gr.Textbox(label="Chủ đề / phong cách mong muốn (không bắt buộc)",
+                                               placeholder="vd: công nghệ, tông tối, nhịp nhanh")
+                    dir_ai_img = gr.Checkbox(value=True, label="Để AI mô tả ảnh nền cho các cảnh")
+                    director_btn = gr.Button("✨ Thiết kế video từ kịch bản")
                 table = gr.Dataframe(
                     value=[[""] * len(K.HEADERS)], headers=K.HEADERS, datatype=["str"] * len(K.HEADERS),
                     type="array", interactive=True, wrap=True, label="Danh sách cảnh (sửa trực tiếp, có thể thêm dòng)",
                 )
                 gr.Markdown(
                     "**Cách điền:** chỉ cần cột **Lời đọc** là đủ — các ô khác để trống sẽ được tự điền.\n\n"
-                    "- **Mẫu:** `hero` (mở đầu) · `stat` (một con số) · `statement` (câu nhận định) · `list` (danh sách) · `outro` (kết)\n"
-                    "- **Tiêu đề:** dùng dấu `|` để xuống dòng · **Danh sách:** các mục cách nhau bằng dấu `|`, "
-                    "có thể bắt đầu bằng emoji (ví dụ `🔋 Pin trâu`)\n"
+                    "- **Mẫu:** `hero` · `stat` · `statement` · `list` · `quote` · `compare` · `image` · `outro`\n"
+                    "- **Tiêu đề:** dùng `|` để xuống dòng, đặt `*từ khoá*` trong dấu sao để tô sáng · **Danh sách:** các mục cách nhau "
+                    "bằng `|`, có thể bắt đầu bằng emoji (ví dụ `🔋 Pin trâu`)\n"
+                    "- **Ảnh nền:** tên file trong thư viện ảnh (tab ③), một đường link ảnh, hoặc **mô tả ảnh** (AI sẽ tạo)\n"
                     "- Lời đọc: số được tự đọc thành chữ (bật/tắt ở tab ②)."
                 )
 
@@ -236,19 +290,30 @@ def build_ui() -> gr.Blocks:
 
             # ③ Hình ảnh ----------------------------------------------------
             with gr.Tab("③ Hình ảnh"):
+                theme = gr.Dropdown(choices=[(v["label"], k) for k, v in THEMES.items()], value=d["theme"],
+                                    label="🎨 Chủ đề hình ảnh (quyết định nền, màu, kiểu chữ, hiệu ứng)")
                 with gr.Row():
                     brand = gr.Textbox(value=d["brand"], label="Tên kênh / thương hiệu")
                     tagline = gr.Textbox(value=d["tagline"], label="Khẩu hiệu (cảnh kết)")
                     url = gr.Textbox(value=d["url"], label="Liên kết (cảnh kết)")
                 with gr.Row():
+                    custom_colors = gr.Checkbox(value=d["custom_colors"], label="Dùng màu của riêng tôi (thay màu của chủ đề)")
                     accent_from = gr.ColorPicker(value=d["accent_from"], label="Màu nhấn 1")
                     accent_to = gr.ColorPicker(value=d["accent_to"], label="Màu nhấn 2")
+                with gr.Row():
                     quality = gr.Radio(
                         choices=[("Nhanh — 720×1280 · 24fps", "fast"), ("Chuẩn — 1080×1920 · 30fps", "standard")],
                         value=d["quality"], label="Chất lượng",
                     )
                 continuous = gr.Checkbox(value=d["continuous"],
                                          label="Nền chuyển động suốt cảnh (đẹp hơn nhưng dựng lâu hơn)")
+                with gr.Accordion("🖼️ Thư viện ảnh nền & ảnh AI", open=False):
+                    media_files = gr.File(file_count="multiple", file_types=["image"], label="Tải ảnh lên (dùng tên file trong cột Ảnh nền)")
+                    media_btn = gr.Button("📥 Thêm vào thư viện")
+                    gallery = gr.Gallery(label="Thư viện ảnh của dự án", columns=6, height=220, interactive=False)
+                    with gr.Row():
+                        force_ai = gr.Checkbox(value=False, label="Tạo lại ảnh AI từ đầu")
+                        ai_btn = gr.Button("🎨 Tạo ảnh AI cho các cảnh có mô tả")
                 with gr.Row():
                     force_render = gr.Checkbox(value=False, label="Dựng lại từ đầu (bỏ qua hình đã có)")
                     render_btn = gr.Button("🖼️ Dựng hình các cảnh", variant="primary")
@@ -269,13 +334,16 @@ def build_ui() -> gr.Blocks:
                 out_files = gr.File(label="Tệp kết quả (video.mp4 · voice.mp3 · script.txt · captions.srt)",
                                     file_count="multiple", interactive=False)
 
-        settings = [brand, tagline, url, accent_from, accent_to, quality, continuous, speed, seed, normalize, ref_text]
+        settings = [brand, tagline, url, theme, custom_colors, accent_from, accent_to, quality, continuous, speed, seed, normalize, ref_text]
         base = [project, table] + settings  # đầu vào chung
 
-        demo.load(open_project, [project], [table] + settings + [ref_status, status])
-        open_btn.click(open_project, [project], [table] + settings + [ref_status, status])
+        demo.load(open_project, [project], [table] + settings + [ref_status, status, gallery])
+        open_btn.click(open_project, [project], [table] + settings + [ref_status, status, gallery])
         save_btn.click(save_project, base, status)
 
+        director_btn.click(director_handler, [table, api_key, dir_model, dir_topic, dir_ai_img, brand], [table, theme, status])
+        media_btn.click(media_handler, [project, media_files], [gallery, media_files, status])
+        ai_btn.click(ai_handler, [project, force_ai, table] + settings, render_log)
         split_btn.click(split_handler, [script_text, add_outro, brand], table)
         fill_btn.click(fill_handler, [table], table)
 

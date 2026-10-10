@@ -14,6 +14,8 @@ DEFAULT_SETTINGS = {
     "brand": "Kênh của tôi",
     "tagline": "Nội dung mới mỗi ngày",
     "url": "",
+    "theme": "aurora",
+    "custom_colors": False,
     "accent_from": "#F59E0B",
     "accent_to": "#A855F7",
     "quality": "fast",

@@ -6,14 +6,17 @@ import re
 from .project import UserError
 
 TEMPLATES = {
-    "hero": "Mở đầu — tiêu đề lớn, nền chuyển động",
-    "stat": "Một con số nổi bật",
-    "statement": "Câu nhận định, chữ hiện từng từ",
-    "list": "Danh sách 2–5 mục",
+    "hero": "Mở đầu — tiêu đề lớn",
+    "stat": "Một con số nổi bật (số tự chạy lên)",
+    "statement": "Câu nhận định, chữ hiện từng từ, từ khoá được tô sáng",
+    "list": "Danh sách 1–5 mục",
+    "quote": "Trích dẫn / câu nói",
+    "compare": "So sánh 2 vế (Danh sách: 2 mục, Phụ đề: nhãn “Trước | Sau”)",
+    "image": "Ảnh nền toàn khung, chữ nằm phía dưới",
     "outro": "Kết video — tên kênh, khẩu hiệu, liên kết",
 }
-FIELDS = ["template", "kicker", "headline", "sub", "items", "voice"]
-HEADERS = ["Mẫu", "Nhãn", "Tiêu đề", "Phụ đề", "Danh sách", "Lời đọc"]
+FIELDS = ["template", "kicker", "headline", "sub", "items", "bg", "voice"]
+HEADERS = ["Mẫu", "Nhãn", "Tiêu đề", "Phụ đề", "Danh sách", "Ảnh nền", "Lời đọc"]
 MAX_SCENES = 40
 
 _BULLET = re.compile(r"^\s*(?:[-•*–]|\d+[.)])\s+")
@@ -47,8 +50,11 @@ def _pack(text: str, max_words: int) -> list[str]:
     return chunks
 
 
+_QUOTED = re.compile(r"[“\"«](.{12,}?)[”\"»]")
+
+
 def blank_scene() -> dict:
-    return {"template": "", "kicker": "", "headline": "", "sub": "", "items": [], "voice": ""}
+    return {"template": "", "kicker": "", "headline": "", "sub": "", "items": [], "bg": "", "voice": ""}
 
 
 def split_script(text: str, brand: str = "", add_outro: bool = True, max_words: int = 38) -> list[dict]:
@@ -75,13 +81,35 @@ def split_script(text: str, brand: str = "", add_outro: bool = True, max_words: 
     return scenes[:MAX_SCENES]
 
 
-def complete_scene(s: dict, i: int, n: int) -> dict:
+def _auto_template(s: dict, i: int, n: int, prev: str | None, prev2: str | None) -> str:
+    voice = s["voice"].strip()
+    if i == 0:
+        return "hero"
+    if i == n - 1 and n > 1:
+        return "outro"
+    if s["items"]:
+        return "list"
+    if _QUOTED.search(voice):
+        t = "quote"
+    elif s["bg"]:
+        t = "image"
+    elif _NUMBER.search(voice) and _words(voice) <= 24 and prev != "stat":
+        t = "stat"
+    else:
+        t = "statement"
+    if t == prev == prev2:  # tránh lặp 3 lần liền nhau
+        t = "image" if t != "image" else "statement"
+    return t
+
+
+def complete_scene(s: dict, i: int, n: int, prev: str | None = None, prev2: str | None = None) -> dict:
     s = {**blank_scene(), **s}
     s["items"] = [x.strip() for x in (s["items"] or []) if str(x).strip()]
     s["headline"] = s["headline"].replace("|", "\n").strip()
-    t = (s["template"] or "").strip().lower()
-    if not t:
-        t = "hero" if i == 0 else "outro" if (i == n - 1 and n > 1) else ("list" if s["items"] else "statement")
+    s["bg"] = (s["bg"] or "").strip()
+    s["n"] = i + 1
+    s["fx"] = ["rise", "left", "zoom", "blur"][i % 4]
+    t = (s["template"] or "").strip().lower() or _auto_template(s, i, n, prev, prev2)
     s["template"] = t
     voice = s["voice"].strip()
     if t == "hero":
@@ -96,16 +124,24 @@ def complete_scene(s: dict, i: int, n: int) -> dict:
             else:
                 s["template"] = "statement"
                 s["headline"] = short_title(voice, 14)
-    elif t == "statement":
-        s["headline"] = s["headline"] or short_title(voice, 14)
+    elif t in ("statement", "image"):
+        s["headline"] = s["headline"] or short_title(voice, 14 if t == "statement" else 12)
+    elif t == "quote":
+        if not s["headline"]:
+            m = _QUOTED.search(voice)
+            s["headline"] = (m.group(1) if m else voice)[:220].strip()
     elif t == "list":
         s["headline"] = s["headline"] or "Điểm chính"
     return s
 
 
 def complete_all(scenes: list[dict]) -> list[dict]:
-    n = len(scenes)
-    return [complete_scene(s, i, n) for i, s in enumerate(scenes)]
+    n, out = len(scenes), []
+    for i, s in enumerate(scenes):
+        prev = out[-1]["template"] if out else None
+        prev2 = out[-2]["template"] if len(out) > 1 else None
+        out.append(complete_scene(s, i, n, prev, prev2))
+    return out
 
 
 def validate(scenes: list[dict]) -> list[str]:
@@ -121,6 +157,8 @@ def validate(scenes: list[dict]) -> list[str]:
             errs.append(f"Cảnh {i}: mẫu “{s['template']}” không có. Dùng: {', '.join(TEMPLATES)}.")
         if s["template"] == "list" and not (1 <= len(s["items"]) <= 5):
             errs.append(f"Cảnh {i}: mẫu list cần 1–5 mục (ngăn cách bằng dấu |).")
+        if s["template"] == "compare" and len(s["items"]) != 2:
+            errs.append(f"Cảnh {i}: mẫu compare cần đúng 2 mục (ngăn cách bằng dấu |).")
     return errs
 
 
@@ -144,7 +182,7 @@ def scenes_to_rows(scenes: list[dict]) -> list[list[str]]:
         s = {**blank_scene(), **s}
         rows.append([
             s["template"], s["kicker"], s["headline"].replace("\n", "|"),
-            s["sub"], " | ".join(s["items"]), s["voice"],
+            s["sub"], " | ".join(s["items"]), s["bg"], s["voice"],
         ])
     return rows or [[""] * len(FIELDS)]
 

@@ -7,28 +7,34 @@ import subprocess
 import tempfile
 from pathlib import Path
 
+from . import media
 from .project import QUALITY, UserError, digest, remove_stale
 from .templates import TEMPLATE_VERSION, build_html
 
 PREVIEW_SECONDS = 4.0
-_VISUAL_KEYS = ("template", "kicker", "headline", "sub", "items")
-_STYLE_KEYS = ("brand", "tagline", "url", "accent_from", "accent_to")
+_VISUAL_KEYS = ("template", "kicker", "headline", "sub", "items", "bg", "fx")
+_STYLE_KEYS = ("brand", "tagline", "url", "theme", "custom_colors", "continuous")
 
 
-def anim_seconds_for(st: dict, duration: float | None) -> float:
-    """Độ dài đoạn hoạt hình. Cố định (không phụ thuộc giọng) trừ khi bật chuyển động liên tục."""
-    if st["continuous"] and duration:
-        return round(duration, 1)
+def anim_seconds_for(st: dict, duration: float | None, photo: bool = False) -> float:
+    """Độ dài đoạn hoạt hình. Cố định (không phụ thuộc giọng) trừ khi cảnh có ảnh nền
+    (chuyển động máy quay suốt cảnh) hoặc bật chuyển động liên tục — khi đó làm tròn lên theo giây."""
+    if (st["continuous"] or photo) and duration:
+        return float(math.ceil(duration))
     return round(float(st["anim_seconds"]), 1)
 
 
 def anim_path(pdir: Path, i: int, scene: dict, st: dict, anim_sec: float) -> Path:
+    colors = (st["accent_from"], st["accent_to"]) if st.get("custom_colors") else ()
     key = digest(
         TEMPLATE_VERSION,
-        {k: scene[k] for k in _VISUAL_KEYS},
-        {k: st[k] for k in _STYLE_KEYS},
+        {k: scene.get(k) for k in _VISUAL_KEYS},
+        {k: st.get(k) for k in _STYLE_KEYS},
+        colors,
         st["quality"],
         anim_sec,
+        media.bg_key(pdir, scene, st),
+        scene.get("n") if st.get("theme") == "mono" else None,
     )
     return pdir / "clips" / f"anim-{i:02d}-{key}.mp4"
 
@@ -93,24 +99,32 @@ class Renderer:
 def render_scenes(pdir: Path, scenes: list[dict], st: dict, durations: dict[int, float] | None = None,
                   force: bool = False, only: list[int] | None = None, log=print) -> dict[int, Path]:
     durations = durations or {}
-    if st["continuous"] and not durations:
-        log("ℹ️ Chế độ chuyển động liên tục cần có giọng đọc trước; tạm dùng thời lượng hoạt hình mặc định.")
     out: dict[int, Path] = {}
     made = 0
+    pending_ai = [i + 1 for i, sc in enumerate(scenes)
+                  if (only is None or i in only) and media.classify(sc["bg"], pdir)[0] == "ai" and media.resolve(pdir, sc, st) is None]
+    if pending_ai:
+        raise UserError("Cảnh " + ", ".join(map(str, pending_ai)) + " cần ảnh AI: hãy bấm “Tạo ảnh AI” trước.")
     with Renderer(st["quality"]) as r:
         for i, sc in enumerate(scenes):
             if only is not None and i not in only:
                 continue
-            anim = anim_seconds_for(st, durations.get(i))
+            photo_path = media.resolve(pdir, sc, st)
+            photo = photo_path is not None
+            if (photo or st["continuous"]) and i not in durations:
+                log(f"⏭️ Cảnh {i + 1}: cần có giọng trước (ảnh nền/chuyển động liên tục phụ thuộc thời lượng).")
+                continue
+            anim = anim_seconds_for(st, durations.get(i), photo)
             path = anim_path(pdir, i, sc, st, anim)
             out[i] = path
             if path.exists() and not force:
                 log(f"• Cảnh {i + 1}: dùng lại hình đã có")
                 continue
-            log(f"🖼️ Cảnh {i + 1}/{len(scenes)} ({sc['template']}): đang dựng {anim:.1f}s hoạt hình...")
-            n = r.render(build_html(sc, st), path, anim)
+            log(f"🖼️ Cảnh {i + 1}/{len(scenes)} ({sc['template']}{' + ảnh nền' if photo else ''}): đang dựng {anim:.1f}s hoạt hình...")
+            uri = media.data_uri(photo_path) if photo else None
+            n = r.render(build_html(sc, st, uri), path, anim)
             remove_stale(path.parent, f"anim-{i:02d}-*.mp4", path)
             made += 1
             log(f"   ✓ {n} khung hình")
-    log(f"✅ Xong hình: dựng mới {made}, dùng lại {len(out) - made}.")
+    log(f"✅ Xong hình: dựng mới {made}, dùng lại {len(out) - made - 0}.")
     return out

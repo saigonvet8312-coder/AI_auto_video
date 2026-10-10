@@ -7,7 +7,7 @@ from pathlib import Path
 
 import numpy as np
 
-from . import render, tts
+from . import aiimage, media, render, tts
 from .project import QUALITY, UserError, digest, remove_stale
 from .scriptkit import sentences
 
@@ -56,7 +56,8 @@ def _collect(pdir: Path, scenes: list[dict], st: dict):
             missing.append(f"giọng cảnh {i + 1}")
             continue
         voices[i] = v
-        a = render.anim_path(pdir, i, sc, st, render.anim_seconds_for(st, v[1]))
+        photo = media.resolve(pdir, sc, st, download=False) is not None
+        a = render.anim_path(pdir, i, sc, st, render.anim_seconds_for(st, v[1], photo))
         if not a.exists():
             missing.append(f"hình cảnh {i + 1}")
         anims[i] = a
@@ -123,8 +124,9 @@ def preview_scene(pdir: Path, i: int, scenes: list[dict], st: dict, log=print) -
     sc = scenes[i]
     v = tts.voice_info(pdir, i, sc, st)
     dur = v[1] if v else render.PREVIEW_SECONDS + 1.0
-    anim_sec = render.anim_seconds_for(st, v[1] if v else None)
-    render.render_scenes(pdir, scenes, st, {i: v[1]} if v else None, only=[i], log=log)
+    photo = media.resolve(pdir, sc, st) is not None
+    anim_sec = render.anim_seconds_for(st, dur, photo)
+    render.render_scenes(pdir, scenes, st, {i: dur}, only=[i], log=log)
     anim = render.anim_path(pdir, i, sc, st, anim_sec)
     out = pdir / "preview.mp4"
     tmp = pdir / "preview-silent.mp4"
@@ -139,5 +141,6 @@ def preview_scene(pdir: Path, i: int, scenes: list[dict], st: dict, log=print) -
 
 def run_all(pdir: Path, scenes: list[dict], st: dict, log=print) -> dict[str, Path]:
     voices = tts.synthesize_all(pdir, scenes, st, log=log)
+    aiimage.generate_all(pdir, scenes, st, log=log)
     render.render_scenes(pdir, scenes, st, {i: d for i, (_, d) in voices.items()}, log=log)
     return assemble(pdir, scenes, st, log=log)
