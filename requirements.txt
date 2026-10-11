@@ -6,3 +6,4 @@ pillow
 requests
 anthropic
 deep-translator
+hf_transfer
