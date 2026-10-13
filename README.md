@@ -31,6 +31,10 @@ Kết quả tải về ở tab ④: `ket-qua.zip` (gồm `video.mp4`, `voice.mp3
 - **Ảnh nền cho từng cảnh** (cột “Ảnh nền”): tên file đã tải lên thư viện, đường link ảnh, hoặc **một mô tả để AI tạo ảnh** (tab ③ → “Tạo ảnh AI”). Cảnh có ảnh nền có chuyển động máy quay.
 - **Đạo diễn AI** (tab ①, tuỳ chọn, cần Anthropic API key): Claude đọc kịch bản rồi chọn chủ đề, mẫu cảnh, chữ ngắn gọn và mô tả ảnh nền cho từng cảnh.
 
+- **Nhạc nền tự tạo** (tab ④): hai kiểu *Êm dịu* và *Trầm tối*, được tổng hợp ngay trong Colab nên không phải tải nhạc và không vướng bản quyền. Nhạc **tự hạ nhỏ khi có giọng đọc**, tự vào/ra êm ở đầu và cuối video. Cũng có thể tải **file nhạc của bạn** lên (mp3/wav/m4a…), nhạc ngắn sẽ được lặp lại.
+- **Hiệu ứng chuyển cảnh**: tiếng vút ở mỗi lần đổi cảnh, thêm tiếng bụp trầm ở cảnh số liệu và cảnh kết.
+- **Phụ đề cháy sẵn** (tab ④, tuỳ chọn): hiện từng cụm ngắn, từ đang đọc được tô sáng dần theo màu nhấn của chủ đề; đặt ở phía dưới hoặc giữa khung. Bấm “Xem thử” ở tab ③ để xem phụ đề của từng cảnh. Thời gian từng từ được ước lượng theo độ dài chữ và dấu câu trong đoạn giọng thật sự vang lên.
+
 ## Phong cách ảnh AI riêng (JSON)
 
 Ảnh AI luôn được tạo theo **JSON phong cách do bạn cung cấp cho từng video** (tab ③ → “Phong cách ảnh AI”, dán JSON hoặc tải file `.json`). Mẫu nằm ở `examples/style-cosmic-tech-brain.json`.
@@ -85,6 +89,8 @@ app/
   voices.py      thư viện giọng đọc (Google Drive)
   render.py      dựng hình bằng Chromium + FFmpeg
   assemble.py    ghép video, trộn âm thanh, xuất phụ đề
+  audiofx.py     nhạc nền tự tạo, hiệu ứng chuyển cảnh, tự hạ nhạc khi có giọng
+  captions.py    phụ đề cháy sẵn kiểu karaoke (ASS)
   jobs.py        chạy nền, phát nhật ký trực tiếp
   project.py     dự án, cài đặt, cache
 ```
