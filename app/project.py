@@ -30,6 +30,10 @@ DEFAULT_SETTINGS = {
     "ref_text": "",
     "gap": 0.25,
     "outro_hold": 2.0,
+    "bgm": "calm",
+    "bgm_volume": 0.18,
+    "sfx": True,
+    "captions": "off",
 }
 
 # Khung thiết kế luôn là 1080x1920; "scale" chỉ đổi độ phân giải xuất ra.

@@ -6,7 +6,7 @@ from pathlib import Path
 
 import gradio as gr
 
-from . import aiimage, assemble, autobg, director, media, render, scriptkit as K, tts, voices
+from . import aiimage, assemble, audiofx, autobg, captions, director, media, render, scriptkit as K, tts, voices
 from . import project as P
 from .jobs import run_job
 from .project import UserError
@@ -18,6 +18,7 @@ RUNTIME = {"api_key": "", "model": director.DEFAULT_MODEL}
 SETTING_KEYS = [
     "brand", "tagline", "url", "theme", "custom_colors", "accent_from", "accent_to", "quality",
     "continuous", "speed", "seed", "normalize", "voice", "style_json", "auto_images",
+    "bgm", "bgm_volume", "sfx", "captions",
 ]
 
 
@@ -32,6 +33,10 @@ def merge_settings(vals) -> dict:
     st["custom_colors"] = bool(st["custom_colors"])
     st["style_json"] = st["style_json"] or ""
     st["auto_images"] = bool(st["auto_images"])
+    st["bgm"] = st["bgm"] if st["bgm"] in dict(audiofx.BGM_CHOICES).values() else "off"
+    st["bgm_volume"] = min(max(float(st["bgm_volume"] or 0.0), 0.0), 0.5)
+    st["sfx"] = bool(st["sfx"])
+    st["captions"] = st["captions"] if st["captions"] in dict(captions.CAPTION_CHOICES).values() else "off"
     return st
 
 
@@ -291,18 +296,27 @@ def _stream_result(job, *args):
             yield log, gr.update(), gr.update()
 
 
-def assemble_handler(name, rows, *vals):
+def _stash_music(pdir, st, bgm_file):
+    """Chép file nhạc người dùng vào dự án (nếu có) và báo lỗi sớm khi chọn 'file' mà chưa có nhạc."""
+    path = audiofx.stash_user_music(pdir, bgm_file)
+    if st["bgm"] == "file" and path is None:
+        raise UserError("Bạn chọn “Dùng file nhạc của tôi” nhưng chưa tải file nhạc lên (tab ④).")
+
+
+def assemble_handler(name, bgm_file, rows, *vals):
     try:
         pdir, scenes, st = prepare(name, rows, vals, auto=True)
+        _stash_music(pdir, st, bgm_file)
     except UserError as e:
         yield f"⚠️ {e}", None, None
         return
     yield from _stream_result(_job_assemble, pdir, scenes, st)
 
 
-def all_handler(name, rows, *vals):
+def all_handler(name, bgm_file, rows, *vals):
     try:
         pdir, scenes, st = prepare(name, rows, vals, auto=True)
+        _stash_music(pdir, st, bgm_file)
     except UserError as e:
         yield f"⚠️ {e}", None, None
         return
@@ -442,6 +456,16 @@ def build_ui() -> gr.Blocks:
             # ④ Xuất video --------------------------------------------------
             with gr.Tab("④ Xuất video"):
                 gr.Markdown("Cần có giọng (②) và hình (③) trước. Hoặc bấm **Chạy tất cả** để làm liền mạch.\n\n⚠️ Dự án **không được lưu lại** sau phiên Colab — tải kết quả về ngay khi xong.")
+                with gr.Accordion("🎵 Âm thanh & phụ đề (tuỳ chọn)", open=True):
+                    with gr.Row():
+                        bgm = gr.Radio(choices=audiofx.BGM_CHOICES, value=d["bgm"], label="Nhạc nền (tự tạo, không vướng bản quyền)")
+                        bgm_volume = gr.Slider(0.0, 0.5, value=d["bgm_volume"], step=0.01, label="Âm lượng nhạc nền")
+                    bgm_file = gr.File(file_types=["audio"], label="File nhạc của bạn (chỉ dùng khi chọn “Dùng file nhạc của tôi”)")
+                    with gr.Row():
+                        sfx = gr.Checkbox(value=d["sfx"], label="Hiệu ứng chuyển cảnh (tiếng vút, tiếng bụp ở cảnh số liệu/kết)")
+                        caps = gr.Radio(choices=captions.CAPTION_CHOICES, value=d["captions"],
+                                        label="Phụ đề cháy sẵn trong video (từ đang đọc được tô sáng)")
+                    gr.Markdown("Nhạc tự hạ nhỏ khi có giọng đọc. Phụ đề có thể xem thử ở tab ③ (nút “Xem thử”).")
                 with gr.Row():
                     assemble_btn = gr.Button("🎬 Ghép video cuối", variant="primary")
                     all_btn = gr.Button("🚀 Chạy tất cả (giọng → hình → ghép)")
@@ -450,7 +474,8 @@ def build_ui() -> gr.Blocks:
                 out_files = gr.File(label="Tải về: ket-qua.zip (gồm tất cả) · video.mp4 · voice.mp3 · script.txt · captions.srt",
                                     file_count="multiple", interactive=False)
 
-        settings = [brand, tagline, url, theme, custom_colors, accent_from, accent_to, quality, continuous, speed, seed, normalize, voice, style_json, auto_images]
+        settings = [brand, tagline, url, theme, custom_colors, accent_from, accent_to, quality, continuous, speed, seed, normalize, voice, style_json, auto_images,
+                    bgm, bgm_volume, sfx, caps]
         base = [project, table] + settings  # đầu vào chung
 
         demo.load(open_project, [project], [table] + settings + [status, gallery])
@@ -477,8 +502,8 @@ def build_ui() -> gr.Blocks:
         render_btn.click(render_handler, [project, force_render, table] + settings, render_log)
         preview_btn.click(preview_handler, [project, preview_idx, table] + settings, [render_log, preview_video])
 
-        assemble_btn.click(assemble_handler, base, [out_log, out_video, out_files])
-        all_btn.click(all_handler, [project, table] + settings, [out_log, out_video, out_files])
+        assemble_btn.click(assemble_handler, [project, bgm_file, table] + settings, [out_log, out_video, out_files])
+        all_btn.click(all_handler, [project, bgm_file, table] + settings, [out_log, out_video, out_files])
     return demo
 
 

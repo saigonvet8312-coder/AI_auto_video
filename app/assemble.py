@@ -8,7 +8,7 @@ from pathlib import Path
 
 import numpy as np
 
-from . import aiimage, media, render, tts
+from . import aiimage, audiofx, captions, media, render, tts
 from .project import QUALITY, UserError, digest, remove_stale
 from .scriptkit import sentences
 
@@ -47,6 +47,15 @@ def make_srt(scenes: list[dict], starts: list[float], speech: list[float]) -> st
             t += d
             n += 1
     return "\n".join(cues)
+
+
+def _accent(st: dict) -> str:
+    """Màu tô sáng từ đang đọc: màu nhấn của chủ đề (hoặc màu riêng của bạn)."""
+    from .templates import THEMES
+
+    if st.get("custom_colors"):
+        return st.get("accent_from") or "#FFD84D"
+    return THEMES.get(st.get("theme"), THEMES["aurora"])["a"]
 
 
 def _collect(pdir: Path, scenes: list[dict], st: dict):
@@ -98,19 +107,39 @@ def assemble(pdir: Path, scenes: list[dict], st: dict, log=print) -> dict[str, P
     silent = pdir / "video-silent.mp4"
     _ffmpeg("-f", "concat", "-safe", "0", "-i", str(lst), "-c", "copy", str(silent))
 
+    gap = float(st["gap"])
     log("🔊 Ghép giọng đọc...")
-    pcm = np.concatenate([tts.read_wav(voices[i][0]) for i in range(n)] + [tts.silence(hold)])
+    pcms = [tts.read_wav(voices[i][0]) for i in range(n)]
+    pcm = np.concatenate(pcms + [tts.silence(hold)])
     wav = pdir / "voice.wav"
     tts.write_wav(wav, pcm)
     mp3 = pdir / "voice.mp3"
     _ffmpeg("-i", str(wav), "-codec:a", "libmp3lame", "-q:a", "2", str(mp3))
     wav.unlink(missing_ok=True)
 
-    video = pdir / "video.mp4"
-    _ffmpeg("-i", str(silent), "-i", str(mp3), "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
-            "-shortest", "-movflags", "+faststart", str(video))
+    audio_in = mp3
+    if st.get("bgm", "off") != "off" or st.get("sfx", True):
+        log("🎵 Trộn nhạc nền và hiệu ứng chuyển cảnh...")
+        cuts = [(starts[i], scenes[i]["template"]) for i in range(1, n)]
+        mixed = audiofx.mix(pcm, total, cuts, st, pdir)
+        audio_in = pdir / "mix.wav"
+        tts.write_wav(audio_in, mixed)
 
-    gap = float(st["gap"])
+    video = pdir / "video.mp4"
+    if st.get("captions", "off") != "off":
+        log("💬 Chèn phụ đề từng từ vào video...")
+        windows = [captions.speech_window(p, gap) for p in pcms]
+        ass = pdir / "captions.ass"
+        ass.write_text(captions.build_ass(scenes, starts, windows, QUALITY[st["quality"]]["size"],
+                                          st["captions"], _accent(st)), encoding="utf-8")
+        captions.burn(silent, ass, video, extra_in=["-i", str(audio_in)],
+                      extra_out=["-c:a", "aac", "-b:a", "192k", "-shortest"])
+    else:
+        _ffmpeg("-i", str(silent), "-i", str(audio_in), "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
+                "-shortest", "-movflags", "+faststart", str(video))
+    if audio_in != mp3:
+        audio_in.unlink(missing_ok=True)
+
     (pdir / "script.txt").write_text("\n\n".join(s["voice"].strip() for s in scenes), encoding="utf-8")
     (pdir / "captions.srt").write_text(
         make_srt(scenes, starts, [max(d - gap, 0.1) for d in durs]), encoding="utf-8"
@@ -136,7 +165,14 @@ def preview_scene(pdir: Path, i: int, scenes: list[dict], st: dict, log=print) -
     out = pdir / "preview.mp4"
     tmp = pdir / "preview-silent.mp4"
     _fit(anim, max(1, round(dur * fps)), fps, tmp)
-    if v:
+    if v and st.get("captions", "off") != "off":
+        pcm = tts.read_wav(v[0])
+        win = captions.speech_window(pcm, float(st["gap"]))
+        ass = pdir / "preview.ass"
+        ass.write_text(captions.build_ass([sc], [0.0], [win], QUALITY[st["quality"]]["size"],
+                                          st["captions"], _accent(st)), encoding="utf-8")
+        captions.burn(tmp, ass, out, extra_in=["-i", str(v[0])], extra_out=["-c:a", "aac", "-shortest"])
+    elif v:
         _ffmpeg("-i", str(tmp), "-i", str(v[0]), "-c:v", "copy", "-c:a", "aac", "-shortest", str(out))
     else:
         tmp.replace(out)
