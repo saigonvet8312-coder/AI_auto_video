@@ -6,12 +6,17 @@ import subprocess
 import sys
 
 from .director import DEFAULT_MODEL
-from .scriptkit import short_title
+from .scriptkit import sentences, short_title
 
-SYSTEM = """Bạn viết mô tả ảnh nền cho video dọc 9:16. Với mỗi cảnh (lời đọc tiếng Việt), hãy viết MỘT mô tả CHỦ THỂ bằng TIẾNG ANH:
-- 10–25 từ, hình ảnh cụ thể hoặc ẩn dụ gắn với nội dung cảnh, dễ vẽ bằng AI.
-- KHÔNG chứa chữ, logo, tên người nổi tiếng, hay thương hiệu.
-- Phong cách ảnh đã được cố định ({style_name}: {style_hint}), vì vậy CHỈ mô tả chủ thể/hình ảnh chính, không lặp lại phong cách, ánh sáng, màu sắc.
+SYSTEM = """Bạn là họa sĩ phân cảnh cho video dọc 9:16. Bạn nhận TOÀN BỘ kịch bản (mỗi dòng là lời đọc một cảnh, tiếng Việt). Với mỗi cảnh, viết MỘT mô tả CHỦ THỂ ảnh bằng TIẾNG ANH để AI vẽ.
+
+Mỗi mô tả (15–30 từ) gồm: chủ thể cụ thể + hành động/trạng thái + bối cảnh + kiểu khung hình (close-up, wide shot, top-down, macro, low angle...).
+
+QUY TẮC:
+1. Vẽ ĐÚNG điều cảnh đang nói: nếu cảnh nhắc vật/người/nơi cụ thể (điện thoại, pin, con mèo, thành phố...) thì chính vật đó phải là chủ thể. Chỉ dùng ẩn dụ khi nội dung trừu tượng (cảm xúc, ý niệm).
+2. Con số/thông số (6000 mAh, 200 MP...) → vẽ vật thể liên quan (viên pin đầy năng lượng, ống kính camera lớn), TUYỆT ĐỐI không đưa chữ, số, logo, giao diện có chữ vào ảnh.
+3. Cả video phải có MỘT mạch hình ảnh nhất quán (cùng nhân vật/vật chủ đạo hoặc cùng thế giới), nhưng đổi kiểu khung hình giữa hai cảnh liền kề để không nhàm.
+4. Không tên người nổi tiếng, không thương hiệu. Không lặp lại phong cách, ánh sáng, màu sắc: phong cách đã cố định ({style_name}: {style_hint}).
 Chỉ trả về một mảng JSON các chuỗi, đúng số lượng và thứ tự cảnh, không giải thích."""
 
 
@@ -24,7 +29,7 @@ def _claude(voices: list[str], style: dict, api_key: str, model: str, client=Non
     user = "\n".join(f"{i}. {v.strip()}" for i, v in enumerate(voices, 1))
     msgs = [{"role": "user", "content": user}]
     for _ in range(2):
-        text = client.messages.create(model=model or DEFAULT_MODEL, max_tokens=2000, system=system,
+        text = client.messages.create(model=model or DEFAULT_MODEL, max_tokens=4000, system=system,
                                       messages=msgs).content[0].text
         try:
             data = json.loads(text[text.index("["): text.rindex("]") + 1])
@@ -48,8 +53,9 @@ def _translate(voices: list[str], log) -> list[str]:
         tr = GoogleTranslator(source="vi", target="en")
         out = []
         for v in voices:
-            en = tr.translate(" ".join(v.split()[:30]))
-            out.append(f"a striking visual metaphor for: {en}".strip())
+            first = sentences(v)[0] if sentences(v) else v
+            en = tr.translate(" ".join(first.split()[:24]))
+            out.append(f"cinematic illustration of the idea: {en}, no text, no letters".strip())
         return out
     except Exception as e:  # noqa: BLE001
         log(f"⚠️ Không dịch tự động được ({e}); dùng nguyên văn tiếng Việt (ảnh có thể kém sát nội dung).")
